@@ -1,0 +1,128 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import apiClient from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { Loading, EmptyState, ErrorState } from '../components/common/Loading';
+import MonthCard from '../components/invoice/MonthCard';
+import InvoiceTemplate from '../components/invoice/InvoiceTemplate';
+import { downloadInvoicePdf } from '../utils/pdf';
+import { MN_MONTHS } from '../utils/format';
+
+import { ORG_CONFIG } from '../config/orgConfig'; 
+
+export default function InvoiceList() {
+  const showToast = useToast();
+
+  const [months, setMonths] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+
+  const pdfRef = useRef(null);
+  const endpoint = ORG_CONFIG.TYPE === 'tera' ? '/invoice/tera' : '/invoice/helpy';
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setSelectedMonth(null);
+    try {
+      const { data } = await apiClient.get(endpoint, { params: { org_id: ORG_CONFIG.ID } });
+      if (!data.success) throw new Error(data.error);
+      setMonths(data.data || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [endpoint]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    function handler() { load(); showToast('Шинэчлэгдлээ', 'success'); }
+    window.addEventListener('helpy:refresh', handler);
+    return () => window.removeEventListener('helpy:refresh', handler);
+  }, [load, showToast]);
+
+  function handleSelectMonth(row) {
+    setSelectedMonth(row);
+  }
+
+  async function handleDownloadPdf() {
+    if (!selectedMonth) return;
+    setDownloading(true);
+    window.scrollTo(0, 0); 
+    showToast('PDF файл руу хөрвүүлж байна. Түр хүлээнэ үү...', 'info');
+    try {
+      const invoiceId = selectedMonth.invoice_id || selectedMonth.INVOICE_ID || `Invoice_${selectedMonth.ym || selectedMonth.YM}`;
+      const filename = `${invoiceId}`;
+      
+      await downloadInvoicePdf(pdfRef.current, filename);
+      showToast('PDF файл амжилттай татагдлаа', 'success');
+    } catch (e) {
+      showToast('Алдаа: ' + e.message, 'error');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const safeYear = selectedMonth?.year || selectedMonth?.YEAR || '';
+  const safeMonth = selectedMonth?.month || selectedMonth?.MONTH || '';
+  
+  const periodLabel = selectedMonth
+    ? `${safeYear} оны ${MN_MONTHS[parseInt(safeMonth, 10)] || safeMonth + '-р сар'}`
+    : '';
+
+  const getRowKey = (row) => row.ym || row.YM || row.billing_period || row.BILLING_PERIOD;
+
+  return (
+    <div className="page active">
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">
+            <i className={`ti ${ORG_CONFIG.TYPE === 'tera' ? 'ti-building-bank' : 'ti-building-hospital'}`} />
+            {ORG_CONFIG.NAME} — Сарын нэхэмжлэлүүд
+          </span>
+        </div>
+        <div className="card-body">
+          {loading && <Loading />}
+          {!loading && error && <ErrorState message={error} />}
+          {!loading && !error && (
+            <div className="month-grid">
+              {months.length === 0
+                ? <EmptyState icon="ti-calendar-off" />
+                : months.map((row) => (
+                    <MonthCard key={getRowKey(row)} row={row} onSelect={handleSelectMonth} />
+                  ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {selectedMonth && (
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">
+              <i className="ti ti-file-invoice" />
+              Нэхэмжлэл № {selectedMonth.invoice_id || selectedMonth.INVOICE_ID} — {ORG_CONFIG.NAME}
+            </span>
+            <button className="btn-success no-print" onClick={handleDownloadPdf} disabled={downloading}>
+              <i className="ti ti-download" /> {downloading ? 'Татаж байна...' : 'PDF татах'}
+            </button>
+          </div>
+          <div className="card-body" style={{ background: '#fff' }}>
+            <InvoiceTemplate
+              ref={pdfRef}
+              orgName={ORG_CONFIG.NAME}
+              periodLabel={periodLabel}
+              row={selectedMonth}
+              visible
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

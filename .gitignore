@@ -1,0 +1,6 @@
+node_modules/
+helpy-backend/node_modules/
+helpy-react/node_modules/
+helpy-backend/instantclient_23_26/
+.env
+.DS_Store
