@@ -5,9 +5,9 @@ import { Loading, EmptyState, ErrorState } from '../components/common/Loading';
 import MonthCard from '../components/invoice/MonthCard';
 import InvoiceTemplate from '../components/invoice/InvoiceTemplate';
 import { downloadInvoicePdf } from '../utils/pdf';
-import { MN_MONTHS } from '../utils/format';
+import { fmt, MN_MONTHS } from '../utils/format';
 
-import { ORG_CONFIG } from '../config/orgConfig'; 
+import { ORG_CONFIG } from '../config/orgConfig';
 
 export default function InvoiceList() {
   const showToast = useToast();
@@ -17,6 +17,11 @@ export default function InvoiceList() {
   const [error, setError] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [downloading, setDownloading] = useState(false);
+
+  // Хэрэглэгчийн өөрөө CreateInvoice хуудаснаас үүсгэсэн нэхэмжлэлүүд
+  const [manualInvoices, setManualInvoices] = useState([]);
+  const [manualLoading, setManualLoading] = useState(true);
+  const [manualError, setManualError] = useState(null);
 
   const pdfRef = useRef(null);
   const endpoint = ORG_CONFIG.TYPE === 'tera' ? '/invoice/tera' : '/invoice/helpy';
@@ -36,15 +41,37 @@ export default function InvoiceList() {
     }
   }, [endpoint]);
 
+  const loadManualInvoices = useCallback(async () => {
+    setManualLoading(true);
+    setManualError(null);
+    try {
+      const { data } = await apiClient.get('/client-invoice/list', { params: { org_id: ORG_CONFIG.ID } });
+      if (!data.success) throw new Error(data.error);
+      setManualInvoices(data.data || []);
+    } catch (e) {
+      setManualError(e.message);
+    } finally {
+      setManualLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
 
   useEffect(() => {
-    function handler() { load(); showToast('Шинэчлэгдлээ', 'success'); }
+    loadManualInvoices();
+  }, [loadManualInvoices]);
+
+  useEffect(() => {
+    function handler() {
+      load();
+      loadManualInvoices();
+      showToast('Шинэчлэгдлээ', 'success');
+    }
     window.addEventListener('helpy:refresh', handler);
     return () => window.removeEventListener('helpy:refresh', handler);
-  }, [load, showToast]);
+  }, [load, loadManualInvoices, showToast]);
 
   function handleSelectMonth(row) {
     setSelectedMonth(row);
@@ -53,12 +80,12 @@ export default function InvoiceList() {
   async function handleDownloadPdf() {
     if (!selectedMonth) return;
     setDownloading(true);
-    window.scrollTo(0, 0); 
+    window.scrollTo(0, 0);
     showToast('PDF файл руу хөрвүүлж байна. Түр хүлээнэ үү...', 'info');
     try {
       const invoiceId = selectedMonth.invoice_id || selectedMonth.INVOICE_ID || `Invoice_${selectedMonth.ym || selectedMonth.YM}`;
       const filename = `${invoiceId}`;
-      
+
       await downloadInvoicePdf(pdfRef.current, filename);
       showToast('PDF файл амжилттай татагдлаа', 'success');
     } catch (e) {
@@ -70,7 +97,7 @@ export default function InvoiceList() {
 
   const safeYear = selectedMonth?.year || selectedMonth?.YEAR || '';
   const safeMonth = selectedMonth?.month || selectedMonth?.MONTH || '';
-  
+
   const periodLabel = selectedMonth
     ? `${safeYear} оны ${MN_MONTHS[parseInt(safeMonth, 10)] || safeMonth + '-р сар'}`
     : '';
@@ -123,6 +150,55 @@ export default function InvoiceList() {
           </div>
         </div>
       )}
+
+      {/* ─── ӨӨРӨӨ ҮҮСГЭСЭН НЭХЭМЖЛЭЛҮҮД ─── */}
+      <div className="card" style={{ marginTop: '24px' }}>
+        <div className="card-header">
+          <span className="card-title">
+            <i className="ti ti-file-text" />
+            Миний үүсгэсэн нэхэмжлэлүүд
+          </span>
+        </div>
+        <div className="card-body">
+          {manualLoading && <Loading />}
+          {!manualLoading && manualError && <ErrorState message={manualError} />}
+          {!manualLoading && !manualError && (
+            manualInvoices.length === 0
+              ? <EmptyState icon="ti-file-off" />
+              : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Харилцагч</th>
+                      <th>Хугацаа</th>
+                      <th>Дүн</th>
+                      <th>Огноо</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualInvoices.map(inv => {
+                      const invId = inv.INVOICE_ID || inv.invoice_id;
+                      const custName = inv.CUSTOMER_NAME || inv.customer_name;
+                      const period = inv.BILLING_PERIOD || inv.billing_period;
+                      const totalAmt = inv.TOTAL_AMOUNT || inv.total_amount;
+                      const createdAt = inv.CREATED_AT || inv.created_at;
+                      return (
+                        <tr key={invId}>
+                          <td>{invId}</td>
+                          <td>{custName}</td>
+                          <td>{period}</td>
+                          <td>{fmt(totalAmt)}</td>
+                          <td>{createdAt ? new Date(createdAt).toLocaleDateString('mn-MN') : '-'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )
+          )}
+        </div>
+      </div>
     </div>
   );
 }

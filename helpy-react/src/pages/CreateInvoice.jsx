@@ -2,13 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { fmt, fmtN } from '../utils/format';
 import { ORG_CONFIG } from '../config/orgConfig';
 import { downloadInvoicePdf } from '../utils/pdf';
-import apiClient from '../api/client'; 
-import { useToast } from '../context/ToastContext'; 
+import apiClient from '../api/client';
+import { useToast } from '../context/ToastContext';
 
 export default function CreateInvoice() {
   const printRef = useRef();
   const showToast = useToast();
-  
+
   const todayObj = new Date();
   const currentMonthVal = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}`;
 
@@ -18,7 +18,7 @@ export default function CreateInvoice() {
     phone: '',
     email: '',
     address: '',
-    period: currentMonthVal, 
+    period: currentMonthVal,
     invNo: '',
   });
 
@@ -27,11 +27,11 @@ export default function CreateInvoice() {
   ]);
 
   const [errors, setErrors] = useState({});
-  const [isSaving, setIsSaving] = useState(false); 
-  const [isSending, setIsSending] = useState(false); 
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   const [images, setImages] = useState({
-    logo: '', 
+    logo: '',
     signature: '/signature.png',
     stamp: '/stamp.png'
   });
@@ -40,7 +40,7 @@ export default function CreateInvoice() {
     function handleRefresh() {
       setCustomer({
         name: '', register: '', phone: '', email: '', address: '', period: currentMonthVal,
-        invNo: `HPY-${ORG_CONFIG.ID || 'GEN'}-${Math.floor(100000 + Math.random() * 900000)}-01`
+        invNo: ''
       });
       setItems([{ id: 1, name: 'Платформ ашиглалтын суурь хураамж', qty: 1, price: 500000 }]);
       setImages({ logo: '', signature: '/signature.png', stamp: '/stamp.png' });
@@ -92,17 +92,17 @@ export default function CreateInvoice() {
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       showToast('Мэдээллээ гүйцэд бөглөнө үү!', 'error');
-      return false; 
+      return false;
     }
     return true;
   };
 
   const saveToDatabase = async () => {
     try {
-      const saveEndpoint = '/client-invoice/create'; 
+      const saveEndpoint = '/client-invoice/create';
       const payload = {
-        org_id: ORG_CONFIG.ID, 
-        invoice_id: customer.invNo, 
+        org_id: ORG_CONFIG.ID,
+        invoice_id: customer.invNo,
         customer_name: customer.name,
         register_no: customer.register,
         billing_period: customer.period,
@@ -110,13 +110,13 @@ export default function CreateInvoice() {
         email: customer.email,
         address: customer.address,
         total_amount: total,
-        items: JSON.stringify(items) 
+        items: JSON.stringify(items)
       };
       await apiClient.post(saveEndpoint, payload);
       return true;
     } catch (err) {
       console.error("Хадгалах алдаа:", err);
-      showToast("Хадгалахад алдаа гарлаа: " + (err.response?.data?.message || err.message), 'error');
+      showToast("Хадгалахад алдаа гарлаа: " + (err.response?.data?.error || err.response?.data?.message || err.message), 'error');
       return false;
     }
   };
@@ -131,6 +131,8 @@ export default function CreateInvoice() {
         window.scrollTo(0, 0);
         await downloadInvoicePdf(printRef.current, customer.invNo);
         showToast('Амжилттай хадгалагдаж, PDF татагдлаа', 'success');
+        // Бусад хуудаснуудад (InvoiceList гэх мэт) шинэ нэхэмжлэлийг шууд харуулахын тулд жагсаалтыг сэргээх
+        window.dispatchEvent(new Event('helpy:refresh'));
       }
     } finally {
       setIsSaving(false);
@@ -140,7 +142,7 @@ export default function CreateInvoice() {
   // 2-Р ТОВЧ: ИМЭЙЛ ИЛГЭЭХ
   const handleSendEmail = async () => {
     if (!validateForm()) return;
-    
+
     if (!customer.email.trim()) {
       showToast('Харилцагчийн и-мэйл хаягийг оруулна уу!', 'error');
       setErrors((prev) => ({ ...prev, email: 'И-мэйл хаяг шаардлагатай' }));
@@ -151,22 +153,27 @@ export default function CreateInvoice() {
     try {
       const isSaved = await saveToDatabase();
       if (isSaved) {
-        const EMAIL_API_URL = '/api/send-invoice-email'; 
+        // ЗАСВАР: apiClient нь өөрөө /api baseURL-тэй тул эндээс '/api' давхар оруулахгүй
+        const EMAIL_API_URL = '/send-invoice-email';
 
         const emailPayload = {
           invoice_id: customer.invNo,
           customer_name: customer.name,
           email: customer.email,
           total_amount: total,
-          period: customer.period
+          period: customer.period,
+          org_id: ORG_CONFIG.ID,
+          operator_id: ORG_CONFIG.OPERATOR_ID,
+          deal_id: ORG_CONFIG.DEAL_ID
         };
 
         await apiClient.post(EMAIL_API_URL, emailPayload);
         showToast('Нэхэмжлэх амжилттай илгээгдлээ!', 'success');
+        window.dispatchEvent(new Event('helpy:refresh'));
       }
     } catch (err) {
       console.error("Имэйл илгээх алдаа:", err);
-      showToast("Имэйл илгээхэд алдаа гарлаа: " + (err.response?.data?.message || err.message), 'error');
+      showToast("Имэйл илгээхэд алдаа гарлаа: " + (err.response?.data?.error || err.response?.data?.message || err.message), 'error');
     } finally {
       setIsSending(false);
     }
@@ -183,7 +190,7 @@ export default function CreateInvoice() {
 
   return (
     <div className="page active p-4" style={{ overflowY: 'auto', height: '100vh', background: '#f1f5f9' }}>
-      
+
       <style>{`
         .form-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); padding: 30px; margin-bottom: 30px; max-width: 1000px; margin-left: 0; }
         .form-section-title { font-size: 16px; font-weight: 700; color: #1e2e4a; margin-bottom: 20px; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; display: flex; align-items: center; gap: 8px; }
@@ -191,11 +198,11 @@ export default function CreateInvoice() {
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 35px; }
         .form-group { display: flex; flex-direction: column; gap: 6px; }
         .form-label { font-size: 13px; font-weight: 600; color: #475569; margin: 0; }
-        
+
         .modern-input { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; color: #1e293b; outline: none; background: #f8fafc; box-sizing: border-box; display: block; transition: all 0.2s;}
         .modern-input:focus { border-color: #3b82f6; background: #fff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
         .modern-input[type="file"] { padding: 6px 12px; cursor: pointer; background: #fff; }
-        select.modern-input { appearance: auto; cursor: pointer; } /* 🔴 Select талбарын нэмэлт тохиргоо */
+        select.modern-input { appearance: auto; cursor: pointer; }
 
         .modern-input.is-invalid { border-color: #ef4444 !important; background: #fef2f2 !important; }
         .modern-input.is-invalid:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important; }
@@ -206,7 +213,7 @@ export default function CreateInvoice() {
         .field-name { flex: 1; min-width: 150px; }
         .field-qty { width: 90px; flex-shrink: 0; }
         .field-price { width: 140px; flex-shrink: 0; }
-        
+
         .btn-modern { padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
         .btn-primary-m { background: #10b981; color: white; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); }
         .btn-primary-m:hover:not(:disabled) { background: #059669; transform: translateY(-1px); }
@@ -220,56 +227,55 @@ export default function CreateInvoice() {
 
       <div className="form-card no-print">
         <div className="form-section-title">
-          <i className="ti ti-building" style={{ fontSize: '18px', color: '#3b82f6' }} /> 
+          <i className="ti ti-building" style={{ fontSize: '18px', color: '#3b82f6' }} />
           1. Төлөгч харилцагчийн мэдээлэл
         </div>
-        
+
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Нэхэмжлэхийн дугаар <span className="req-star">*</span></label>
-            <input 
-              type="text" 
-              className={`modern-input ${errors.invNo ? 'is-invalid' : ''}`} 
-              name="invNo" 
-              value={customer.invNo} 
-              onChange={handleClientChange} 
-              placeholder="Жишээ: 001" 
+            <input
+              type="text"
+              className={`modern-input ${errors.invNo ? 'is-invalid' : ''}`}
+              name="invNo"
+              value={customer.invNo}
+              onChange={handleClientChange}
+              placeholder="Жишээ: 001"
             />
             {errors.invNo && <div className="error-text">{errors.invNo}</div>}
           </div>
 
           <div className="form-group">
             <label className="form-label">Байгууллагын нэр <span className="req-star">*</span></label>
-            <input 
-              type="text" 
-              className={`modern-input ${errors.name ? 'is-invalid' : ''}`} 
-              name="name" 
-              value={customer.name} 
-              onChange={handleClientChange} 
-              placeholder="Жишээ: Компани ХХК" 
+            <input
+              type="text"
+              className={`modern-input ${errors.name ? 'is-invalid' : ''}`}
+              name="name"
+              value={customer.name}
+              onChange={handleClientChange}
+              placeholder="Жишээ: Компани ХХК"
             />
             {errors.name && <div className="error-text">{errors.name}</div>}
           </div>
 
           <div className="form-group">
             <label className="form-label">Регистрийн дугаар <span className="req-star">*</span></label>
-            <input 
-              type="text" 
-              className={`modern-input ${errors.register ? 'is-invalid' : ''}`} 
-              name="register" 
-              value={customer.register} 
-              onChange={handleClientChange} 
-              placeholder="1234567" 
+            <input
+              type="text"
+              className={`modern-input ${errors.register ? 'is-invalid' : ''}`}
+              name="register"
+              value={customer.register}
+              onChange={handleClientChange}
+              placeholder="1234567"
             />
             {errors.register && <div className="error-text">{errors.register}</div>}
           </div>
 
-          {/* 🔴 ШИНЭЧИЛСЭН: Тооцооны хугацаа сонгох гоё Dropdown */}
           <div className="form-group">
             <label className="form-label">Тооцооны хугацаа</label>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <select 
-                className="modern-input" 
+              <select
+                className="modern-input"
                 style={{ flex: 1 }}
                 value={customer.period.split('-')[0] || todayObj.getFullYear()}
                 onChange={(e) => {
@@ -282,8 +288,8 @@ export default function CreateInvoice() {
                   <option key={y} value={y}>{y} он</option>
                 ))}
               </select>
-              <select 
-                className="modern-input" 
+              <select
+                className="modern-input"
                 style={{ flex: 1 }}
                 value={customer.period.split('-')[1] || String(todayObj.getMonth() + 1).padStart(2, '0')}
                 onChange={(e) => {
@@ -301,26 +307,26 @@ export default function CreateInvoice() {
 
           <div className="form-group">
             <label className="form-label">Утасны дугаар <span className="req-star">*</span></label>
-            <input 
-              type="tel" 
-              className={`modern-input ${errors.phone ? 'is-invalid' : ''}`} 
-              name="phone" 
-              value={customer.phone} 
-              onChange={handleClientChange} 
-              placeholder="9911-XXXX" 
+            <input
+              type="tel"
+              className={`modern-input ${errors.phone ? 'is-invalid' : ''}`}
+              name="phone"
+              value={customer.phone}
+              onChange={handleClientChange}
+              placeholder="9911-XXXX"
             />
             {errors.phone && <div className="error-text">{errors.phone}</div>}
           </div>
 
           <div className="form-group">
             <label className="form-label">И-мэйл хаяг</label>
-            <input 
-              type="email" 
-              className={`modern-input ${errors.email ? 'is-invalid' : ''}`} 
-              name="email" 
-              value={customer.email} 
-              onChange={handleClientChange} 
-              placeholder="info@company.mn" 
+            <input
+              type="email"
+              className={`modern-input ${errors.email ? 'is-invalid' : ''}`}
+              name="email"
+              value={customer.email}
+              onChange={handleClientChange}
+              placeholder="info@company.mn"
             />
             {errors.email && <div className="error-text">{errors.email}</div>}
           </div>
@@ -332,36 +338,80 @@ export default function CreateInvoice() {
         </div>
 
         <div className="form-section-title">
-          <i className="ti ti-list-check" style={{ fontSize: '18px', color: '#3b82f6' }} /> 
+          <i className="ti ti-list-check" style={{ fontSize: '18px', color: '#3b82f6' }} />
           2. Нэхэмжлэх үйлчилгээний мөрүүд
         </div>
-        
-        {items.map((item, index) => (
-          <div className="item-row-container" key={item.id}>
-            <div style={{ width: '30px', fontWeight: 'bold', color: '#64748b', textAlign: 'center', flexShrink: 0 }}>{index + 1}</div>
-            <div className="field-name">
-              <input type="text" className="modern-input" style={{ width: '100%', background: '#fff' }} placeholder="Үйлчилгээний нэр" value={item.name} onChange={(e) => handleItemChange(item.id, 'name', e.target.value)} />
+
+        {/* Баганын толгой хэсэг */}
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', padding: '0 16px 8px 16px', fontSize: '13px', fontWeight: '600', color: '#475569' }}>
+          <div style={{ width: '30px', textAlign: 'center', flexShrink: 0 }}>№</div>
+          <div className="field-name">Үйлчилгээний нэр / Тайлбар</div>
+          <div className="field-qty" style={{ textAlign: 'center' }}>Тоо ширхэг</div>
+          <div className="field-price" style={{ textAlign: 'right' }}>Нэгж үнэ ₮</div>
+          <div style={{ width: '120px', textAlign: 'right', flexShrink: 0 }}>Нийт үнэ ₮</div>
+          <div style={{ width: '38px', flexShrink: 0 }}></div>
+        </div>
+
+        {items.map((item, index) => {
+          const rowTotal = (Number(item.qty || 0) * Number(item.price || 0));
+          return (
+            <div className="item-row-container" key={item.id}>
+              <div style={{ width: '30px', fontWeight: 'bold', color: '#64748b', textAlign: 'center', flexShrink: 0 }}>{index + 1}</div>
+
+              <div className="field-name">
+                <input
+                  type="text"
+                  className="modern-input"
+                  style={{ width: '100%', background: '#fff' }}
+                  placeholder="Үйлчилгээний нэр"
+                  value={item.name}
+                  onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
+                />
+              </div>
+
+              <div className="field-qty">
+                <input
+                  type="number"
+                  min="0"
+                  className="modern-input"
+                  style={{ width: '100%', textAlign: 'right', background: '#fff' }}
+                  placeholder="Тоо"
+                  value={item.qty}
+                  onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)}
+                />
+              </div>
+
+              <div className="field-price">
+                <input
+                  type="number"
+                  min="0"
+                  className="modern-input"
+                  style={{ width: '100%', textAlign: 'right', background: '#fff' }}
+                  placeholder="Нэгж үнэ"
+                  value={item.price}
+                  onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
+                />
+              </div>
+
+              <div style={{ width: '120px', textAlign: 'right', fontWeight: '600', color: '#1e293b', flexShrink: 0, fontSize: '14px' }}>
+                {fmt(rowTotal)}
+              </div>
+
+              <div style={{ flexShrink: 0 }}>
+                <button className="btn-modern btn-danger-m" onClick={() => removeItem(item.id)} title="Мөр устгах">
+                  <i className="ti ti-trash" style={{ fontSize: '16px' }} />
+                </button>
+              </div>
             </div>
-            <div className="field-qty">
-              <input type="number" className="modern-input" style={{ width: '100%', textAlign: 'right', background: '#fff' }} placeholder="Тоо" value={item.qty} onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)} />
-            </div>
-            <div className="field-price">
-              <input type="number" className="modern-input" style={{ width: '100%', textAlign: 'right', background: '#fff' }} placeholder="Нэгж үнэ ₮" value={item.price} onChange={(e) => handleItemChange(item.id, 'price', e.target.value)} />
-            </div>
-            <div style={{ flexShrink: 0 }}>
-              <button className="btn-modern btn-danger-m" onClick={() => removeItem(item.id)}>
-                <i className="ti ti-trash" style={{ fontSize: '16px' }} />
-              </button>
-            </div>
-          </div>
-        ))}
-        
+          );
+        })}
+
         <button className="btn-modern btn-secondary-m mt-2" style={{ marginBottom: '30px' }} onClick={addItem}>
           <i className="ti ti-plus" /> Шинэ мөр нэмэх
         </button>
 
         <div className="form-section-title section-stamp">
-          <i className="ti ti-photo" style={{ fontSize: '18px', color: '#3b82f6' }} /> 
+          <i className="ti ti-photo" style={{ fontSize: '18px', color: '#3b82f6' }} />
           3. Байгууллагын лого, тамга, гарын үсэг оруулах
         </div>
         <div className="form-grid">
@@ -383,19 +433,19 @@ export default function CreateInvoice() {
           <div style={{ fontSize: '15px', color: '#475569' }}>
             Нийт дүн: <strong style={{ fontSize: '18px', color: '#1e293b' }}>{fmt(total)}</strong>
           </div>
-          
+
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              className="btn-modern btn-secondary-m" 
-              onClick={handleDownloadPdf} 
+            <button
+              className="btn-modern btn-secondary-m"
+              onClick={handleDownloadPdf}
               disabled={isSaving || isSending}
             >
               <i className="ti ti-download" /> {isSaving ? 'Уншиж байна...' : 'PDF татах'}
             </button>
-            
-            <button 
-              className="btn-modern btn-primary-m" 
-              onClick={handleSendEmail} 
+
+            <button
+              className="btn-modern btn-primary-m"
+              onClick={handleSendEmail}
               disabled={isSaving || isSending}
             >
               <i className="ti ti-send" /> {isSending ? 'Илгээж байна...' : 'Нэхэмжлэх илгээх'}
@@ -406,11 +456,11 @@ export default function CreateInvoice() {
 
       {/* ─── ХЭВЛЭГДЭХ БОДИТ ХАРАГДАЦ ─── */}
       <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0', maxWidth: '1000px', marginLeft: '0' }} className="no-print-bg">
-        <div 
-          ref={printRef} 
-          className="invoice-box" 
-          style={{ 
-            padding: '25px 40px', background: '#fff', width: '100%', maxWidth: '800px', 
+        <div
+          ref={printRef}
+          className="invoice-box"
+          style={{
+            padding: '25px 40px', background: '#fff', width: '100%', maxWidth: '800px',
             boxSizing: 'border-box', color: '#333', fontFamily: 'Arial, sans-serif', margin: '0 AUTO',
             boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
           }}
@@ -515,7 +565,7 @@ export default function CreateInvoice() {
 
             <div style={{ width: '45%' }}>
               <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e2e4a', marginBottom: '12px' }}>Нэхэмжлэл хүлээн зөвшөөрсөн:</div>
-              <div style={{ height: '50px' }}></div> 
+              <div style={{ height: '50px' }}></div>
               <div style={{ fontSize: '12px', borderBottom: '1px dashed #ccc', paddingBottom: '6px' }}>Захирал / Нягтлан: ........................... / ...................... /</div>
             </div>
           </div>
